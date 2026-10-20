@@ -1,0 +1,26 @@
+{
+  "name": "redis-postgres-cache-demo",
+  "version": "1.0.0",
+  "description": "Dockerised Node.js demonstration of PostgreSQL query caching with Redis or AWS ElastiCache.",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "db:migrate": "node scripts/migrate.js",
+    "db:seed": "node scripts/seed.js",
+    "test": "node --test",
+    "lint": "node --check src/server.js"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@aws-sdk/client-elasticache": "^3.670.0",
+    "@aws-sdk/client-rds": "^3.670.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "ioredis": "^5.4.1",
+    "pg": "^8.13.1",
+    "pino": "^9.5.0",
+    "pino-http": "^10.3.0"
+  }
+}

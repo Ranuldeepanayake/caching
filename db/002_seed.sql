@@ -1,0 +1,8 @@
+-- Repeatable demo data: conflict-safe inserts keep container restarts harmless.
+INSERT INTO categories(name,slug) VALUES ('Electronics','electronics'),('Home Office','home-office'),('Outdoor','outdoor') ON CONFLICT (slug) DO NOTHING;
+INSERT INTO customers(email,full_name) SELECT 'customer' || n || '@example.com','Customer ' || n FROM generate_series(1,40) n ON CONFLICT DO NOTHING;
+INSERT INTO products(category_id,sku,name,description,price) SELECT c.id, 'SKU-'||n, CASE WHEN n%3=0 THEN 'Mechanical Keyboard '||n WHEN n%3=1 THEN 'Wireless Headphones '||n ELSE 'Ergonomic Desk Lamp '||n END, 'High quality ecommerce product with durable materials and thoughtful design.', (20+n*3.75)::numeric FROM generate_series(1,60) n CROSS JOIN LATERAL (SELECT id FROM categories ORDER BY id LIMIT 1 OFFSET ((n-1)%3)) c ON CONFLICT (sku) DO NOTHING;
+INSERT INTO inventory(product_id,warehouse,available_quantity,reserved_quantity) SELECT id,'Colombo',100+(id%30),id%8 FROM products p WHERE NOT EXISTS (SELECT 1 FROM inventory i WHERE i.product_id=p.id);
+INSERT INTO orders(customer_id,status,ordered_at) SELECT c.id, (ARRAY['paid','shipped','delivered','delivered','cancelled'])[1+(n%5)], now()-n*interval '1 day' FROM customers c CROSS JOIN generate_series(1,8) n;
+INSERT INTO order_items(order_id,product_id,quantity,unit_price) SELECT o.id, ((o.id+n)%60)+1, 1+(n%4), p.price FROM orders o JOIN products p ON p.id=((o.id+n)%60)+1 CROSS JOIN generate_series(1,3) n;
+INSERT INTO reviews(customer_id,product_id,rating,review_text) SELECT ((p.id+n)%40)+1,p.id,1+((p.id+n)%5),'Useful and well made.' FROM products p CROSS JOIN generate_series(1,3) n;
