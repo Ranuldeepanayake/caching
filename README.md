@@ -61,6 +61,14 @@ Provider combinations are independent: `self-hosted/self-hosted`, `aws/aws`, `aw
 
 `GET /api/products?q=keyboard&category=electronics&cache=true&page=1&pageSize=20` returns `{ data, cacheHit, durationMs, filters }`. `GET /api/health` is a lightweight health endpoint. Cache keys include the complete filter object and expire after `CACHE_TTL_SECONDS` (default 60).
 
+`/sitemap.xml` and `/robots.txt` are generated dynamically. `PUBLIC_BASE_URL` tells the application which public URL search engines and browsers should use when following sitemap links. This is important when the Node.js process runs behind Docker, a reverse proxy, a load balancer, or an HTTPS terminator, because the internal host/port may differ from the externally reachable address. For example:
+
+```dotenv
+PUBLIC_BASE_URL=https://cache.example.com
+```
+
+In production, set it to the canonical HTTPS origin so the sitemap does not publish an internal hostname, container port, or an HTTP URL. If it is omitted, the app derives the origin from the incoming request host and forwarded protocol, which is convenient for local development but depends on the proxy forwarding correct headers. The sitemap includes the public application page, while `/api/` is excluded from crawling.
+
 Set `CACHE_ENABLED=false` to deliberately run database-only. In that mode the application does not create a Redis/ElastiCache client, does not validate cache endpoint variables, and the UI toggle safely remains a no-op. When caching is enabled but Redis is temporarily unavailable, the app retries the connection in the background and serves requests directly from PostgreSQL until the cache returns.
 
 ## Schema and operations

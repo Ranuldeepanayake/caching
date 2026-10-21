@@ -12,6 +12,7 @@ export const config = {
   // Non-sensitive operational settings.
   port: Number(process.env.APP_PORT || 3000),
   logLevel: process.env.LOG_LEVEL || 'info',
+  publicBaseUrl: process.env.PUBLIC_BASE_URL,
   databaseProvider: provider(process.env.DATABASE_PROVIDER, 'DATABASE_PROVIDER'),
   cacheProvider: provider(process.env.CACHE_PROVIDER, 'CACHE_PROVIDER'),
   cacheEnabled: process.env.CACHE_ENABLED !== 'false',
