@@ -23,7 +23,7 @@ The Compose database is initialised automatically by the scripts in `db/`. To re
 
 ## Bare-metal Linux
 
-Install Node.js 20+ and PostgreSQL 16+ plus Redis 7+. Create a database and user, then configure the endpoints:
+Install Node.js 20+ and PostgreSQL 18+ plus Redis 7+. Create a database and user, then configure the endpoints:
 
 ```bash
 createdb shop
@@ -56,6 +56,16 @@ ELASTICACHE_TLS=true
 For least privilege, the application identity needs `rds:DescribeDBInstances` and `elasticache:DescribeReplicationGroups` when identifiers are used. The runtime also needs network access to the private RDS and ElastiCache endpoints, security-group rules allowing PostgreSQL/Redis traffic, and TLS/password settings matching the services. AWS SDK default credential resolution is supported, so IAM roles are preferred on EC2/ECS/EKS over long-lived access keys.
 
 Provider combinations are independent: `self-hosted/self-hosted`, `aws/aws`, `aws/self-hosted`, and `self-hosted/aws` are all valid. Only one database and one cache are created by each app process.
+
+## Is this like session storage?
+
+The implementation uses the same broad Redis idea as session storage, but it is a different caching pattern.
+
+For sessions, Redis is usually the system of record for a short-lived session object. A request reads the session by a stable key such as `session:<id>`, and the application may write updates back to Redis. Losing the session store can affect authentication or user state, so availability and expiration policy are especially important.
+
+This application uses a cache-aside pattern for PostgreSQL query results. PostgreSQL remains the source of truth. The application checks Redis using a key derived from the query filters, queries PostgreSQL on a miss, stores the result with a TTL, and safely falls back to PostgreSQL if Redis is unavailable. The UI cache toggle controls whether that lookup/write path is used for the request.
+
+The reusable concepts are the Redis connection, key naming, TTLs, serialization, and reconnect handling. The important differences are that product results are derived data rather than authoritative state, cache keys represent query parameters rather than users, and invalidation or short TTLs are needed when the underlying product/order data changes. A session implementation would normally add authenticated session IDs, stricter access controls, explicit logout deletion, and a policy for what happens when the session store is unavailable.
 
 ## API
 
