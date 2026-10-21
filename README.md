@@ -19,7 +19,16 @@ docker compose up --build
 
 Open http://localhost:3000. The first request with cache enabled is a miss and populates Redis. Repeating it should show a cache hit and a lower duration. Turn the toggle off to force PostgreSQL for comparison.
 
-The Compose database is initialised automatically by the scripts in `db/`. To reset the demo data, run `docker compose down -v && docker compose up --build`.
+The Compose database is initialised automatically by the scripts in `db/`. PostgreSQL 18 requires the volume to be mounted at `/var/lib/postgresql` rather than the legacy `/var/lib/postgresql/data`; the provided Compose file already uses the PostgreSQL 18-compatible mount.
+
+If this project was previously run with the old PostgreSQL 16/legacy volume layout, the old named volume is not automatically upgraded. Because this is demo data, reset it with:
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+Do not use `down -v` if the database contains data you need. Preserve that volume and perform a PostgreSQL major-version upgrade with `pg_upgrade` or a logical backup/restore using `pg_dump` and `pg_restore`, following the PostgreSQL upgrade documentation.
 
 Docker's PostgreSQL image runs the files in `db/` automatically only when the `postgres-data` volume is created for the first time. If the volume already exists, PostgreSQL keeps the existing database and skips those initialization files. For an existing Compose volume, use `docker compose exec app npm run db:migrate` after the application container is running, or recreate the volume if a clean demo database is required.
 
