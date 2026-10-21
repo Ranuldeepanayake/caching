@@ -21,6 +21,8 @@ Open http://localhost:3000. The first request with cache enabled is a miss and p
 
 The Compose database is initialised automatically by the scripts in `db/`. To reset the demo data, run `docker compose down -v && docker compose up --build`.
 
+Docker's PostgreSQL image runs the files in `db/` automatically only when the `postgres-data` volume is created for the first time. If the volume already exists, PostgreSQL keeps the existing database and skips those initialization files. For an existing Compose volume, use `docker compose exec app npm run db:migrate` after the application container is running, or recreate the volume if a clean demo database is required.
+
 ## Bare-metal Linux
 
 Install Node.js 20+ and PostgreSQL 18+ plus Redis 7+. Create a database and user, then configure the endpoints:
@@ -83,7 +85,9 @@ Set `CACHE_ENABLED=false` to deliberately run database-only. In that mode the ap
 
 ## Schema and operations
 
-`db/001_schema.sql` creates `categories`, `customers`, `products`, `inventory`, `orders`, `order_items`, and `reviews`, with foreign keys, checks, indexes, and a search index. `db/002_seed.sql` creates a repeatable demo dataset using conflict-safe inserts. Edit or extend these files when adding data, then apply them with `npm run db:migrate`.
+`db/001_schema.sql` creates `categories`, `customers`, `products`, `inventory`, `orders`, `order_items`, and `reviews`, with foreign keys, checks, indexes, and a search index. `db/002_seed.sql` creates a repeatable demo dataset using conflict-safe inserts. Use `npm run db:migrate` for schema plus seed bootstrap, or `npm run db:seed` when the schema already exists and only the demo data should be applied.
+
+The schema script uses `CREATE ... IF NOT EXISTS`, so existing tables are preserved. The seed script preserves existing categories, customers, products, and inventory, and only creates the demo order, order-item, and review sets when those tables are empty. It does not delete or overwrite existing application data. It is not a general schema migration system: changes to existing columns or constraints must be handled with an explicit versioned migration.
 
 Logs are JSON and include ISO timestamps, service/module context, request metadata, provider selection, cache outcome, row count, and duration. In containers, use `docker compose logs -f app` and set `LOG_LEVEL=debug` when more detail is needed. Startup logs include non-sensitive settings, endpoint-presence flags, and true/false indicators for sensitive variables such as AWS keys and database/cache passwords. Secret values are never logged.
 
