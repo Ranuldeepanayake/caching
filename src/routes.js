@@ -5,7 +5,7 @@ import { config } from './config.js';
 import { childLogger } from './logger.js';
 const log = childLogger('routes');
 
-export function createRouter(service) {
+export function createRouter(service, invalidationService) {
   const router = express.Router();
   router.get('/health', async (_req, res) => { try { res.json({ status: 'ok' }); } catch (error) { res.status(503).json({ status: 'error', message: error.message }); } });
   router.get('/products', async (req, res, next) => {
@@ -16,5 +16,37 @@ export function createRouter(service) {
       res.json({ ...result, filters });
     } catch (error) { log.error({ err: error }, 'product request failed'); next(error); }
   });
+
+  // Invalidate every cached product entry on demand. The cache generation is
+  // bumped, so previously cached results become unreachable immediately.
+  router.post('/cache/invalidate', async (req, res, next) => {
+    try {
+      if (!invalidationService) {
+        res.status(503).json({ error: 'invalidation_unavailable', message: 'cache invalidation is not available' });
+        return;
+      }
+      const result = await invalidationService.invalidateNow('api request');
+      log.info({ generation: result.generation }, 'cache invalidation requested through the API');
+      res.json({ invalidated: true, generation: result.generation, persisted: result.persisted, durationMs: result.durationMs });
+    } catch (error) { log.error({ err: error }, 'cache invalidation failed'); next(error); }
+  });
+
+  // Report the current cache configuration and the automatic invalidation state.
+  router.get('/cache/status', async (_req, res, next) => {
+    try {
+      const fingerprint = invalidationService?.getFingerprint?.() ?? null;
+      res.json({
+        cacheEnabled: config.cacheEnabled,
+        ttlSeconds: config.cacheTtlSeconds,
+        keyPrefix: config.cacheKeyPrefix,
+        automaticInvalidation: {
+          enabled: config.cacheInvalidationEnabled,
+          intervalMs: config.cacheInvalidationIntervalMs
+        },
+        fingerprint
+      });
+    } catch (error) { log.error({ err: error }, 'cache status request failed'); next(error); }
+  });
+
   return router;
 }
