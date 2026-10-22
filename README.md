@@ -84,7 +84,7 @@ Invalidation is where the two patterns differ most. A session is deleted on logo
 
 ## API
 
-`GET /api/products?q=keyboard&category=electronics&cache=true&page=1&pageSize=20` returns `{ data, cacheHit, durationMs, filters }`. `GET /api/health` is a lightweight health endpoint. Cache keys include the complete filter object and expire after `CACHE_TTL_SECONDS` (default 60).
+`GET /api/products?q=keyboard&category=electronics&cache=true&page=1&pageSize=20` returns `{ data, cacheHit, durationMs, pagination, filters }`. The `pageSize` value is the PostgreSQL `LIMIT`: it controls how many products are queried and returned for that request, not just how many cards the browser displays. The UI and API intentionally cap `pageSize` at 100 to protect the database and response size; larger values are clamped to 100. The `pagination` object includes `page`, `pageSize`, `totalCount`, `totalPages`, `hasPrevious`, and `hasNext`, allowing the UI to paginate even when the final page is exactly full. `GET /api/health` is a lightweight health endpoint. Cache keys include the complete filter object and expire after `CACHE_TTL_SECONDS` (default 60).
 
 `POST /api/cache/invalidate` invalidates every cached product entry on demand and returns `{ invalidated, generation, persisted, durationMs }`. `GET /api/cache/status` reports the active cache configuration and the current data fingerprint.
 
@@ -123,7 +123,8 @@ CACHE_TTL_SECONDS=60
 # Set to false to turn off the automatic change detection.
 CACHE_INVALIDATION_ENABLED=true
 # How often the data fingerprint is checked, in milliseconds. 0 disables polling.
-CACHE_INVALIDATION_INTERVAL_MS=30000
+# Default: 300000 ms (5 minutes).
+CACHE_INVALIDATION_INTERVAL_MS=300000
 ```
 
 A failed fingerprint check is logged and retried on the next tick rather than being treated as a change, so a transient database error cannot empty the cache.

@@ -47,7 +47,8 @@ export const config = {
   // Cache invalidation: a generation counter is bumped whenever the underlying
   // product data changes, so every previously cached entry becomes unreachable.
   cacheInvalidationEnabled: process.env.CACHE_INVALIDATION_ENABLED !== 'false',
-  cacheInvalidationIntervalMs: nonNegativeInt(process.env.CACHE_INVALIDATION_INTERVAL_MS, 30000)
+  // Poll for source-data changes every five minutes by default.
+  cacheInvalidationIntervalMs: nonNegativeInt(process.env.CACHE_INVALIDATION_INTERVAL_MS, 300000)
 };
 
 export function assertConfig() {

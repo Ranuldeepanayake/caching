@@ -10,6 +10,15 @@ import { searchProducts } from '../repositories/productRepository.js';
 import { buildProductKey, bumpGeneration, readGeneration } from '../cacheKeys.js';
 const log = childLogger('product-service');
 
+// Normalize cached entries so deployments can safely read entries written by
+// an older version that stored only an array of products.
+function normalizeResult(value, fallbackPageSize = 20) {
+  if (Array.isArray(value)) {
+    return { data: value, totalCount: value.length < fallbackPageSize ? value.length : null };
+  }
+  return { data: value?.data ?? [], totalCount: value?.totalCount ?? 0 };
+}
+
 export function createProductService(pool, redis) {
   /**
    * Read the product list, using the cache when it is enabled and available.
@@ -30,10 +39,10 @@ export function createProductService(pool, redis) {
         try {
           const cached = await redis.get(key);
           if (cached) {
-            const data = JSON.parse(cached);
+            const result = normalizeResult(JSON.parse(cached), filters.pageSize);
             const durationMs = Number(process.hrtime.bigint() - started) / 1e6;
             log.info({ cacheEnabled: true, cacheHit: true, durationMs, key }, 'product request completed');
-            return { data, cacheHit: true, durationMs };
+            return { ...result, cacheHit: true, durationMs };
           }
         } catch (error) {
           // A cache outage is non-fatal: fall through to PostgreSQL and keep serving data.
@@ -41,17 +50,17 @@ export function createProductService(pool, redis) {
         }
       }
 
-      const data = await searchProducts(pool, filters);
+      const result = normalizeResult(await searchProducts(pool, filters), filters.pageSize);
       if (cacheRequested) {
         try {
-          await redis.set(key, JSON.stringify(data), 'EX', config.cacheTtlSeconds);
+          await redis.set(key, JSON.stringify(result), 'EX', config.cacheTtlSeconds);
         } catch (error) {
           log.warn({ err: error }, 'cache write failed; response remains valid');
         }
       }
       const durationMs = Number(process.hrtime.bigint() - started) / 1e6;
       log.info({ cacheEnabled: cacheRequested, cacheHit: false, durationMs, key }, 'product request completed');
-      return { data, cacheHit: false, durationMs };
+      return { ...result, cacheHit: false, durationMs };
     },
 
     /**

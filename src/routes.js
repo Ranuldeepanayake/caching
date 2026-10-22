@@ -10,10 +10,27 @@ export function createRouter(service, invalidationService) {
   router.get('/health', async (_req, res) => { try { res.json({ status: 'ok' }); } catch (error) { res.status(503).json({ status: 'error', message: error.message }); } });
   router.get('/products', async (req, res, next) => {
     try {
-      const filters = { query: String(req.query.q || ''), category: String(req.query.category || ''), page: Math.max(1, Number(req.query.page || 1)), pageSize: Math.min(100, Math.max(1, Number(req.query.pageSize || config.defaultPageSize))) };
+      const pageNum = Number(req.query.page || 1);
+      const pageSizeNum = Number(req.query.pageSize || config.defaultPageSize);
+      const filters = { query: String(req.query.q || ''), category: String(req.query.category || ''), page: Math.max(1, Number.isInteger(pageNum) ? pageNum : 1), pageSize: Math.min(100, Math.max(1, Number.isInteger(pageSizeNum) ? pageSizeNum : config.defaultPageSize)) };
       const useCache = String(req.query.cache || 'true').toLowerCase() === 'true';
       const result = await service.search(filters, useCache);
-      res.json({ ...result, filters });
+      // Older service implementations may not provide a count. Keep the
+      // response usable in that case while current queries provide exact data.
+      const totalCount = Number.isInteger(result.totalCount) ? result.totalCount : null;
+      const totalPages = totalCount === null ? null : Math.ceil(totalCount / filters.pageSize);
+      res.json({
+        ...result,
+        pagination: {
+          page: filters.page,
+          pageSize: filters.pageSize,
+          totalCount,
+          totalPages,
+          hasPrevious: filters.page > 1,
+          hasNext: totalPages === null ? result.data.length === filters.pageSize : filters.page < totalPages
+        },
+        filters
+      });
     } catch (error) { log.error({ err: error }, 'product request failed'); next(error); }
   });
 
