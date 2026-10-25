@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import Redis from 'ioredis';
 import { ElastiCacheClient, DescribeReplicationGroupsCommand } from '@aws-sdk/client-elasticache';
 import { config } from '../config.js';
@@ -17,18 +18,48 @@ async function resolveAwsRedis() {
   return { host: endpoint.Address, port: endpoint.Port || config.elasticache.port };
 }
 
+async function buildTlsOptions(tlsEnabled, tlsInsecure, tlsCertPath) {
+  if (!tlsEnabled) return undefined;
+  const tlsOpts = { rejectUnauthorized: !tlsInsecure };
+  if (tlsCertPath) {
+    tlsOpts.ca = await fs.readFile(tlsCertPath);
+  }
+  return tlsOpts;
+}
+
 export async function createRedisClient() {
   // Disabled cache mode deliberately creates no Redis client and therefore no reconnect loop.
   if (!config.cacheEnabled) {
     log.info({ provider: config.cacheProvider }, 'cache disabled; Redis connection will not be created');
     return null;
   }
-  const endpoint = config.cacheProvider === 'self-hosted' ? new URL(config.redisUrl) : await withConnectionRetry(resolveAwsRedis, 'aws-elasticache');
+
+  let clientConfig;
+  if (config.cacheProvider === 'self-hosted') {
+    const urlObj = new URL(config.redisUrl);
+    const tlsOpts = await buildTlsOptions(config.redis.tls, config.redis.tlsInsecure, config.redis.tlsCertPath);
+    clientConfig = {
+      host: urlObj.hostname,
+      port: Number(urlObj.port || 6379),
+      username: urlObj.username || undefined,
+      password: urlObj.password || undefined,
+      tls: tlsOpts
+    };
+  } else {
+    // AWS ElastiCache
+    const endpoint = await withConnectionRetry(resolveAwsRedis, 'aws-elasticache');
+    const tlsOpts = await buildTlsOptions(config.elasticache.tls, config.elasticache.tlsInsecure, config.elasticache.tlsCertPath);
+    clientConfig = {
+      host: endpoint.host,
+      port: endpoint.port,
+      username: config.elasticache.username || undefined,
+      password: config.elasticache.password || undefined,
+      tls: tlsOpts
+    };
+  }
+
   const client = new Redis({
-    ...(endpoint instanceof URL ? { host: endpoint.hostname, port: Number(endpoint.port || 6379), username: endpoint.username || undefined, password: endpoint.password || undefined, tls: endpoint.protocol === 'rediss:' ? {} : undefined } : endpoint),
-    username: config.elasticache.username || undefined,
-    password: config.elasticache.password || undefined,
-    tls: config.elasticache.tls ? {} : undefined,
+    ...clientConfig,
     // Keep retrying after runtime disconnects; the service can continue using PostgreSQL.
     retryStrategy: (attempt) => Math.min(config.connectionRetryBaseDelayMs * (2 ** Math.min(attempt - 1, 6)), 30000),
     maxRetriesPerRequest: null,

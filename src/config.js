@@ -63,8 +63,17 @@ export const config = {
     host: process.env.ELASTICACHE_HOST,                               // Alternative: explicit host
     port: Number(process.env.ELASTICACHE_PORT || 6379),
     tls: process.env.ELASTICACHE_TLS === 'true',
+    tlsInsecure: process.env.ELASTICACHE_TLS_INSECURE === 'true',      // Skip certificate verification if true
+    tlsCertPath: process.env.ELASTICACHE_TLS_CERT_PATH,                // Path to CA certificate file
     username: process.env.ELASTICACHE_USERNAME,
     password: process.env.ELASTICACHE_PASSWORD
+  },
+
+  // Self-hosted Redis TLS configuration
+  redis: {
+    tls: process.env.REDIS_TLS === 'true',
+    tlsInsecure: process.env.REDIS_TLS_INSECURE === 'true',            // Skip certificate verification if true
+    tlsCertPath: process.env.REDIS_TLS_CERT_PATH                       // Path to CA certificate file
   },
 
   // Cache behavior: TTL is how long a cached entry survives; generation counter invalidates stale entries
@@ -125,7 +134,9 @@ export function startupConfigSummary() {
       rdsUsername: Boolean(config.rds.username),
       rdsPassword: Boolean(config.rds.password),
       elasticacheUsername: Boolean(config.elasticache.username),
-      elasticachePassword: Boolean(config.elasticache.password)
+      elasticachePassword: Boolean(config.elasticache.password),
+      elasticacheTlsCertPath: Boolean(config.elasticache.tlsCertPath),
+      redisTlsCertPath: Boolean(config.redis.tlsCertPath)
     }
   };
 }

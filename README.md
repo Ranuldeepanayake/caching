@@ -45,6 +45,16 @@ DATABASE_URL=postgres://user:password@host:5432/database
 ```dotenv
 CACHE_PROVIDER=self-hosted
 REDIS_URL=redis://:password@host:6379
+# Username defaults to "default" if not provided in URL
+```
+
+**Self-hosted cache (with TLS):**
+```dotenv
+CACHE_PROVIDER=self-hosted
+REDIS_URL=rediss://:password@host:6379
+REDIS_TLS=true
+REDIS_TLS_INSECURE=false              # Set to true to skip certificate verification (development only)
+REDIS_TLS_CERT_PATH=/path/to/ca.crt  # Optional: CA certificate file
 ```
 
 **AWS RDS:**
@@ -67,8 +77,10 @@ AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
 ELASTICACHE_REPLICATION_GROUP_ID=shop-redis    # OR ELASTICACHE_HOST=endpoint
 ELASTICACHE_TLS=true
-ELASTICACHE_USERNAME=default
+ELASTICACHE_TLS_INSECURE=false                 # Set to true to skip certificate verification (development only)
+ELASTICACHE_TLS_CERT_PATH=/path/to/ca.crt     # Optional: CA certificate file
 ELASTICACHE_PASSWORD=...
+# ELASTICACHE_USERNAME=default                 # Optional; "default" is used if not provided
 ```
 
 ### Optional configuration
@@ -100,6 +112,16 @@ CONNECTION_RETRY_BASE_DELAY_MS=1000        # Default: 1000
 # Explicitly specify host instead of discovering from identifier
 RDS_HOST=prod-db.abc123.us-east-1.rds.amazonaws.com
 ELASTICACHE_HOST=prod-cache.abc123.ng.0001.use1.cache.amazonaws.com
+
+# TLS for self-hosted Redis (optional)
+REDIS_TLS=false                          # Enable TLS for Redis (default: false)
+REDIS_TLS_INSECURE=false                 # Skip certificate verification (development only)
+REDIS_TLS_CERT_PATH=/path/to/ca.crt     # Path to CA certificate file
+
+# TLS for AWS ElastiCache (optional)
+ELASTICACHE_TLS=true                     # Enable TLS for ElastiCache (default: true)
+ELASTICACHE_TLS_INSECURE=false           # Skip certificate verification (development only)
+ELASTICACHE_TLS_CERT_PATH=/path/to/ca.crt  # Path to CA certificate file
 ```
 
 ---
@@ -175,11 +197,34 @@ Provider combinations are independent: `self-hosted/self-hosted`, `aws/aws`, `aw
 
 ### Self-Hosted: PostgreSQL + Redis
 
+**Basic setup (no authentication or TLS):**
 ```dotenv
 DATABASE_PROVIDER=self-hosted
 CACHE_PROVIDER=self-hosted
 DATABASE_URL=postgres://user:password@localhost:5432/shop
-REDIS_URL=redis://:password@localhost:6379
+REDIS_URL=redis://localhost:6379
+# Username defaults to "default" (no authentication needed by default)
+```
+
+**With password (for docker-compose-v2.yml with --requirepass):**
+```dotenv
+DATABASE_PROVIDER=self-hosted
+CACHE_PROVIDER=self-hosted
+DATABASE_URL=postgres://user:password@localhost:5432/shop
+REDIS_URL=redis://:password@redis:6379
+REDIS_PASSWORD=password              # Required for docker-compose interpolation
+# Username defaults to "default" if not provided in URL
+```
+
+**With TLS for Redis:**
+```dotenv
+DATABASE_PROVIDER=self-hosted
+CACHE_PROVIDER=self-hosted
+DATABASE_URL=postgres://user:password@localhost:5432/shop
+REDIS_URL=rediss://:password@localhost:6379    # Note: rediss:// for TLS
+REDIS_TLS=true
+REDIS_TLS_INSECURE=false                       # Set to true to skip verification in dev
+REDIS_TLS_CERT_PATH=/path/to/ca.crt           # Optional: custom CA certificate
 ```
 
 No AWS credentials needed. Suitable for:
@@ -203,6 +248,8 @@ RDS_USERNAME=app
 RDS_PASSWORD=...
 ELASTICACHE_REPLICATION_GROUP_ID=shop-redis
 ELASTICACHE_TLS=true
+ELASTICACHE_TLS_INSECURE=false
+ELASTICACHE_TLS_CERT_PATH=/path/to/ca.crt    # Optional
 ELASTICACHE_USERNAME=default
 ELASTICACHE_PASSWORD=...
 ```
@@ -232,6 +279,8 @@ CACHE_PROVIDER=aws
 ELASTICACHE_HOST=my-cache.abc123.ng.0001.apse1.cache.amazonaws.com
 ELASTICACHE_PORT=6379
 ELASTICACHE_TLS=true
+ELASTICACHE_TLS_INSECURE=false
+ELASTICACHE_TLS_CERT_PATH=/path/to/ca.crt    # Optional
 ELASTICACHE_USERNAME=default
 ELASTICACHE_PASSWORD=...
 ```
@@ -251,6 +300,8 @@ RDS_PASSWORD=...
 # ElastiCache with explicit endpoint
 ELASTICACHE_HOST=my-cache.abc123.ng.0001.apse1.cache.amazonaws.com
 ELASTICACHE_TLS=true
+ELASTICACHE_TLS_INSECURE=false
+ELASTICACHE_TLS_CERT_PATH=/path/to/ca.crt    # Optional
 ELASTICACHE_USERNAME=default
 ELASTICACHE_PASSWORD=...
 
@@ -266,10 +317,13 @@ DATABASE_URL=postgres://user:password@localhost:5432/shop
 
 CACHE_PROVIDER=aws
 ELASTICACHE_HOST=my-cache.abc123.ng.0001.apse1.cache.amazonaws.com
+ELASTICACHE_TLS=true
+ELASTICACHE_TLS_INSECURE=false
+ELASTICACHE_TLS_CERT_PATH=/path/to/ca.crt    # Optional
 ELASTICACHE_PASSWORD=...
 ```
 
-**AWS RDS + Self-hosted Redis:**
+**AWS RDS + Self-hosted Redis (with TLS):**
 ```dotenv
 DATABASE_PROVIDER=aws
 RDS_HOST=my-db.abc123.us-east-1.rds.amazonaws.com
@@ -277,8 +331,92 @@ RDS_USERNAME=app
 RDS_PASSWORD=...
 
 CACHE_PROVIDER=self-hosted
-REDIS_URL=redis://localhost:6379
+REDIS_URL=rediss://:password@localhost:6379
+REDIS_TLS=true
+REDIS_TLS_INSECURE=false
+REDIS_TLS_CERT_PATH=/path/to/ca.crt
 ```
+
+## TLS Configuration
+
+Both self-hosted Redis and AWS ElastiCache support TLS encryption. TLS is optional for self-hosted Redis but recommended for production workloads.
+
+### Self-Hosted Redis with TLS
+
+By default, self-hosted Redis connections are unencrypted. To enable TLS:
+
+1. **Update the connection URL to use `rediss://`** (note the extra `s`):
+   ```dotenv
+   REDIS_URL=rediss://:password@redis.example.com:6379
+   ```
+
+2. **Enable TLS in the application:**
+   ```dotenv
+   REDIS_TLS=true
+   ```
+
+3. **Optional: Provide a custom CA certificate** if using a self-signed certificate or a private CA:
+   ```dotenv
+   REDIS_TLS_CERT_PATH=/etc/ssl/certs/redis-ca.crt
+   ```
+   Mount this file into the container if using Docker:
+   ```yaml
+   volumes:
+     - ./certs/redis-ca.crt:/etc/ssl/certs/redis-ca.crt:ro
+   ```
+
+4. **For development only: Skip certificate verification** (not recommended for production):
+   ```dotenv
+   REDIS_TLS_INSECURE=true
+   ```
+
+### AWS ElastiCache with TLS
+
+AWS ElastiCache supports in-transit encryption. TLS is always recommended for ElastiCache:
+
+```dotenv
+ELASTICACHE_TLS=true
+```
+
+By default, the application trusts AWS-issued certificates. If you need to provide a custom CA:
+
+```dotenv
+ELASTICACHE_TLS_CERT_PATH=/etc/ssl/certs/elasticache-ca.crt
+```
+
+Or to skip verification (development only, not recommended):
+
+```dotenv
+ELASTICACHE_TLS_INSECURE=true
+```
+
+### Certificate File Handling
+
+When using `REDIS_TLS_CERT_PATH` or `ELASTICACHE_TLS_CERT_PATH`:
+
+- The file path must be readable by the application process
+- In Docker, mount the certificate as a read-only volume
+- Use PEM format (most CA bundles are PEM)
+- Example Docker mount:
+  ```yaml
+  volumes:
+    - ./certs:/etc/ssl/certs:ro
+  environment:
+    REDIS_TLS_CERT_PATH: /etc/ssl/certs/ca-bundle.crt
+  ```
+
+### Debugging TLS Issues
+
+If TLS connection fails:
+
+1. Verify the certificate file exists and is readable
+2. Check that the server is actually listening on the TLS port (usually 6379 or 6380)
+3. Test with a Redis CLI from inside the container:
+   ```bash
+   docker compose exec app redis-cli -h redis.example.com --tls
+   ```
+4. Set `LOG_LEVEL=debug` to see detailed connection errors
+5. If using a self-signed certificate, either provide it via `REDIS_TLS_CERT_PATH` or set `REDIS_TLS_INSECURE=true` (development only)
 
 ## Is this like session storage?
 
