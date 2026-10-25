@@ -19,19 +19,20 @@ import { computeDataFingerprint, fingerprintsDiffer } from '../repositories/data
 import { bumpGeneration } from '../cacheKeys.js';
 const log = childLogger('invalidation-service');
 
+// Create invalidation service that monitors data changes and triggers cache invalidation.
+// Supports both automatic polling and manual on-demand invalidation.
+// @param pool - PostgreSQL connection pool (used for fingerprint queries)
+// @param redis - Redis client (used for cache invalidation)
+// @param productService - productService instance (called to invalidate when data changes)
 export function createInvalidationService(pool, redis, productService) {
-  // Last successfully computed fingerprint. It is kept in memory: the value is
-  // only used to detect a change between two consecutive checks, and a restart
-  // legitimately re-establishes the baseline.
-  let lastFingerprint = null;
-  let timer = null;
-  let running = false;
+  // State tracking for the automatic invalidation loop
+  let lastFingerprint = null;      // Previously computed fingerprint; null until first check
+  let timer = null;                // setInterval handle for periodic checks
+  let running = false;             // Prevent concurrent fingerprint computations
 
-  /**
-   * Compare the current data fingerprint with the previous one and invalidate
-   * the cache when something changed.
-   * Returns a summary describing what happened, for logging and for the API.
-   */
+  // Compare current data fingerprint against baseline and invalidate cache if data changed.
+  // Conservative approach: failed checks are logged and retried, never treated as changes.
+  // @returns {checked, changed, generation?, reason?} - whether check completed and if data changed
   async function checkForChanges() {
     if (running) return { checked: false, changed: false, reason: 'check already in progress' };
     running = true;
@@ -64,10 +65,11 @@ export function createInvalidationService(pool, redis, productService) {
   return {
     checkForChanges,
 
-    /**
-     * Force an invalidation regardless of whether the data changed.
-     * This backs the manual invalidation button and the API endpoint.
-     */
+    // Manually force cache invalidation immediately, regardless of data changes.
+    // Used by the "Invalidate cache" UI button and POST /api/cache/invalidate endpoint.
+    // Re-establishes fingerprint baseline afterward so next automatic check doesn't report stale change.
+    // @param reason - string describing why invalidation was triggered (logged for diagnostics)
+    // @returns {generation, persisted, durationMs, reason} - invalidation result and reason
     async invalidateNow(reason = 'manual request') {
       const result = await productService.invalidate();
       // Re-establish the baseline so the next automatic check compares against
@@ -81,7 +83,8 @@ export function createInvalidationService(pool, redis, productService) {
       return { ...result, reason };
     },
 
-    /** Start the periodic change check. */
+    // Start the automatic data-change detection loop. Called on application startup.
+    // Runs checkForChanges immediately to establish baseline, then continues on the configured interval.
     start() {
       if (!config.cacheInvalidationEnabled) {
         log.info('automatic cache invalidation disabled');
@@ -106,7 +109,8 @@ export function createInvalidationService(pool, redis, productService) {
       log.info({ intervalMs: config.cacheInvalidationIntervalMs }, 'automatic cache invalidation started');
     },
 
-    /** Stop the periodic change check. */
+    // Stop the automatic data-change detection loop. Called on application shutdown.
+    // Clears the polling timer and allows process to exit cleanly.
     stop() {
       if (timer) {
         clearInterval(timer);
@@ -114,7 +118,8 @@ export function createInvalidationService(pool, redis, productService) {
       }
     },
 
-    /** Expose the current baseline fingerprint, for diagnostics. */
+    // Return the current data fingerprint for diagnostics (exposed via GET /api/cache/status).
+    // Used to confirm data changed detection is working and show fingerprint in UI.
     getFingerprint() {
       return lastFingerprint;
     }

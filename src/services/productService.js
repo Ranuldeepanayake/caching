@@ -10,8 +10,8 @@ import { searchProducts } from '../repositories/productRepository.js';
 import { buildProductKey, bumpGeneration, readGeneration } from '../cacheKeys.js';
 const log = childLogger('product-service');
 
-// Normalize cached entries so deployments can safely read entries written by
-// an older version that stored only an array of products.
+// Normalize cached entries for forward/backward compatibility: older versions may have
+// stored only an array; newer versions store {data, totalCount}. Handles both formats.
 function normalizeResult(value, fallbackPageSize = 20) {
   if (Array.isArray(value)) {
     return { data: value, totalCount: value.length < fallbackPageSize ? value.length : null };
@@ -19,13 +19,15 @@ function normalizeResult(value, fallbackPageSize = 20) {
   return { data: value?.data ?? [], totalCount: value?.totalCount ?? 0 };
 }
 
+// Create and return productService instance. Handles cache-aside reads: check Redis on cache hit,
+// fall back to PostgreSQL on cache miss, and populate Redis with results.
+// @param pool - PostgreSQL connection pool (used for searchProducts queries)
+// @param redis - Redis client (or null if caching is disabled)
 export function createProductService(pool, redis) {
-  /**
-   * Read the product list, using the cache when it is enabled and available.
-   *
-   * The returned object always reports `cacheHit` and `durationMs`, whether the
-   * data came from Redis or from PostgreSQL, so the UI can compare both paths.
-   */
+  // Implements cache-aside pattern for product searches
+  // @param filters - {query, category, page, pageSize} - search parameters
+  // @param useCache - boolean - whether to use cache for this request
+  // @returns {data, totalCount, cacheHit, durationMs} - product results with cache metrics
   return {
     async search(filters, useCache) {
       const started = process.hrtime.bigint();
@@ -63,14 +65,11 @@ export function createProductService(pool, redis) {
       return { ...result, cacheHit: false, durationMs };
     },
 
-    /**
-     * Invalidate every cached product entry.
-     *
-     * The generation counter is incremented, which makes all existing keys
-     * unreachable. Stale keys are not deleted immediately; they are left to
-     * expire on their own TTL. This keeps invalidation a single O(1)
-     * operation regardless of how much is cached.
-     */
+    // Manually invalidate all cached entries by incrementing the generation counter.
+    // Existing cache keys include the old generation and become unreachable immediately.
+    // Stale keys are left to expire on their own TTL rather than being deleted.
+    // This keeps invalidation O(1) regardless of cache size.
+    // @returns {generation, persisted, durationMs} - new generation number and operation timing
     async invalidate() {
       const started = process.hrtime.bigint();
       const { generation, persisted } = await bumpGeneration(redis);

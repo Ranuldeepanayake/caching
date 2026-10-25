@@ -10,12 +10,133 @@ The query joins categories, products, inventory, orders, order items, and approv
 
 Cached results are invalidated automatically when the underlying data changes, and can also be invalidated on demand from the UI. The cache TTL is configurable through an environment variable.
 
-## Quick start with Docker Compose
+## Environment Variables
 
-Requirements: Linux, Docker Engine, and Docker Compose v2.
+The application uses centralized environment variable parsing in `src/config.js`. Variables are read from multiple sources with this priority:
+
+1. **Runtime environment variables** (highest priority) — set via `docker run -e`, `docker compose environment:`, or shell
+2. **`.env` file** — loaded by `dotenv/config` in `config.js`, used for local development defaults
+3. **Hardcoded fallbacks** — sensible defaults for optional settings
+4. **Validation** — required variables cause startup failure if missing
+
+### How Docker loads environment variables
+
+- **Docker CLI**: `docker run` does NOT automatically read `.env`. Use `--env-file .env` or `-e VAR=value`
+- **Docker Compose**: `docker compose up` automatically reads `.env` file AND applies the `environment:` section (which overrides `.env`)
+
+In this project's `docker-compose.yml`:
+```yaml
+app:
+  env_file: .env                    # Loads .env file first
+  environment:                      # These values override .env
+    DATABASE_PROVIDER: self-hosted
+    DATABASE_URL: postgres://app:app@postgres:5432/shop
+```
+
+### Required variables by provider
+
+**Self-hosted database:**
+```dotenv
+DATABASE_PROVIDER=self-hosted
+DATABASE_URL=postgres://user:password@host:5432/database
+```
+
+**Self-hosted cache:**
+```dotenv
+CACHE_PROVIDER=self-hosted
+REDIS_URL=redis://:password@host:6379
+```
+
+**AWS RDS:**
+```dotenv
+DATABASE_PROVIDER=aws
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+RDS_INSTANCE_IDENTIFIER=shop-postgres    # OR RDS_HOST=endpoint
+RDS_DATABASE=shop
+RDS_USERNAME=app
+RDS_PASSWORD=...
+```
+
+**AWS ElastiCache:**
+```dotenv
+CACHE_PROVIDER=aws
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+ELASTICACHE_REPLICATION_GROUP_ID=shop-redis    # OR ELASTICACHE_HOST=endpoint
+ELASTICACHE_TLS=true
+ELASTICACHE_USERNAME=default
+ELASTICACHE_PASSWORD=...
+```
+
+### Optional configuration
+
+```dotenv
+# Server
+APP_PORT=3000                              # Default: 3000
+LOG_LEVEL=info                             # Default: info (debug, info, warn, error)
+
+# Public URL (for sitemap and SEO)
+PUBLIC_BASE_URL=https://cache.example.com
+
+# Caching behavior
+CACHE_ENABLED=true                         # Default: true
+CACHE_TTL_SECONDS=60                       # Default: 60
+CACHE_KEY_PREFIX=shop-demo                 # Default: shop-demo
+
+# Cache invalidation
+CACHE_INVALIDATION_ENABLED=true            # Default: true
+CACHE_INVALIDATION_INTERVAL_MS=300000      # Default: 300000 (5 minutes), 0 to disable
+
+# Pagination
+DEFAULT_PAGE_SIZE=20                        # Default: 20
+
+# Connection retry
+CONNECTION_RETRY_ATTEMPTS=8                # Default: 8
+CONNECTION_RETRY_BASE_DELAY_MS=1000        # Default: 1000
+
+# Explicitly specify host instead of discovering from identifier
+RDS_HOST=prod-db.abc123.us-east-1.rds.amazonaws.com
+ELASTICACHE_HOST=prod-cache.abc123.ng.0001.use1.cache.amazonaws.com
+```
+
+---
+
+## Quick Start
+
+### Choose Your Configuration
+
+Copy the appropriate `.env` file for your setup:
+
+```bash
+# Local development: PostgreSQL + Redis
+cp .env.self-hosted .env
+
+# AWS with explicit endpoints (no credentials needed)
+cp .env.aws-explicit .env
+
+# AWS with discovery (requires IAM role or credentials)
+cp .env.aws-discovery .env
+
+# Mixed: AWS RDS + self-hosted Redis
+cp .env.mixed-aws-rds-self-hosted-redis .env
+
+# Mixed: self-hosted PostgreSQL + AWS ElastiCache
+cp .env.mixed-self-hosted-postgres-aws-elasticache .env
+```
+
+Or use the generic template:
 
 ```bash
 cp .env.example .env
+# Then edit .env to select your database and cache providers
+```
+
+### Docker Compose
+
+```bash
 docker compose up --build
 ```
 
@@ -48,9 +169,27 @@ npm start
 
 Set `DATABASE_URL=postgres://user:password@host:5432/shop` and `REDIS_URL=redis://:password@host:6379` in `.env`. `npm run dev` enables Node's watch mode.
 
-## AWS configuration
+## Configuration Patterns
 
-Choose either AWS provider independently:
+Provider combinations are independent: `self-hosted/self-hosted`, `aws/aws`, `aws/self-hosted`, and `self-hosted/aws` are all valid. Only one database and one cache are created by each app process.
+
+### Self-Hosted: PostgreSQL + Redis
+
+```dotenv
+DATABASE_PROVIDER=self-hosted
+CACHE_PROVIDER=self-hosted
+DATABASE_URL=postgres://user:password@localhost:5432/shop
+REDIS_URL=redis://:password@localhost:6379
+```
+
+No AWS credentials needed. Suitable for:
+- Local development with Docker Compose
+- Self-managed infrastructure
+- On-premises deployments
+
+### AWS with Discovery (Using Instance Identifiers)
+
+The AWS SDK looks up endpoints from identifiers. **Requires AWS credentials** (`DescribeDBInstances`, `DescribeReplicationGroups` permissions):
 
 ```dotenv
 DATABASE_PROVIDER=aws
@@ -64,11 +203,82 @@ RDS_USERNAME=app
 RDS_PASSWORD=...
 ELASTICACHE_REPLICATION_GROUP_ID=shop-redis
 ELASTICACHE_TLS=true
+ELASTICACHE_USERNAME=default
+ELASTICACHE_PASSWORD=...
 ```
 
-For least privilege, the application identity needs `rds:DescribeDBInstances` and `elasticache:DescribeReplicationGroups` when identifiers are used. The runtime also needs network access to the private RDS and ElastiCache endpoints, security-group rules allowing PostgreSQL/Redis traffic, and TLS/password settings matching the services. AWS SDK default credential resolution is supported, so IAM roles are preferred on EC2/ECS/EKS over long-lived access keys.
+**Best for**: EC2/ECS/EKS with IAM roles (credentials provided by platform, not stored in `.env`)
 
-Provider combinations are independent: `self-hosted/self-hosted`, `aws/aws`, `aws/self-hosted`, and `self-hosted/aws` are all valid. Only one database and one cache are created by each app process.
+### AWS with Explicit Endpoints (No Discovery)
+
+Directly specify endpoints. **No AWS credentials needed.** Suitable for:
+- Private endpoints (VPC endpoints, private network)
+- When you already know the endpoint
+- Avoiding AWS SDK discovery calls
+
+**RDS only:**
+```dotenv
+DATABASE_PROVIDER=aws
+RDS_HOST=my-db.abc123.us-east-1.rds.amazonaws.com
+RDS_PORT=5432
+RDS_DATABASE=shop
+RDS_USERNAME=app
+RDS_PASSWORD=...
+```
+
+**ElastiCache only:**
+```dotenv
+CACHE_PROVIDER=aws
+ELASTICACHE_HOST=my-cache.abc123.ng.0001.apse1.cache.amazonaws.com
+ELASTICACHE_PORT=6379
+ELASTICACHE_TLS=true
+ELASTICACHE_USERNAME=default
+ELASTICACHE_PASSWORD=...
+```
+
+**Both (no AWS credentials needed):**
+```dotenv
+DATABASE_PROVIDER=aws
+CACHE_PROVIDER=aws
+AWS_REGION=us-east-1
+
+# RDS with explicit endpoint
+RDS_HOST=my-db.abc123.us-east-1.rds.amazonaws.com
+RDS_DATABASE=shop
+RDS_USERNAME=app
+RDS_PASSWORD=...
+
+# ElastiCache with explicit endpoint
+ELASTICACHE_HOST=my-cache.abc123.ng.0001.apse1.cache.amazonaws.com
+ELASTICACHE_TLS=true
+ELASTICACHE_USERNAME=default
+ELASTICACHE_PASSWORD=...
+
+# No AWS credentials needed!
+```
+
+### Mixed Providers
+
+**Self-hosted database + AWS ElastiCache:**
+```dotenv
+DATABASE_PROVIDER=self-hosted
+DATABASE_URL=postgres://user:password@localhost:5432/shop
+
+CACHE_PROVIDER=aws
+ELASTICACHE_HOST=my-cache.abc123.ng.0001.apse1.cache.amazonaws.com
+ELASTICACHE_PASSWORD=...
+```
+
+**AWS RDS + Self-hosted Redis:**
+```dotenv
+DATABASE_PROVIDER=aws
+RDS_HOST=my-db.abc123.us-east-1.rds.amazonaws.com
+RDS_USERNAME=app
+RDS_PASSWORD=...
+
+CACHE_PROVIDER=self-hosted
+REDIS_URL=redis://localhost:6379
+```
 
 ## Is this like session storage?
 

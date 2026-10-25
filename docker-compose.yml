@@ -3,11 +3,6 @@ services:
     build: .
     ports: ["3000:3000"]
     env_file: .env
-    environment:
-      DATABASE_PROVIDER: self-hosted
-      CACHE_PROVIDER: self-hosted
-      DATABASE_URL: postgres://app:app@postgres:5432/shop
-      REDIS_URL: redis://redis:6379
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

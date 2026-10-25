@@ -1,13 +1,27 @@
-// HTTP boundary: converts query-string input into typed service filters and
-// keeps transport errors separate from database/cache implementation details.
+// HTTP API routes: HTTP boundary converts query-string input into typed service filters,
+// handles pagination/filtering validation, and keeps transport errors separate from service logic.
 import express from 'express';
 import { config } from './config.js';
 import { childLogger } from './logger.js';
 const log = childLogger('routes');
 
+// Create Express router with all API endpoints
+// @param service - productService instance (handles search with cache-aside pattern)
+// @param invalidationService - invalidationService instance (handles manual/automatic cache invalidation)
 export function createRouter(service, invalidationService) {
   const router = express.Router();
-  router.get('/health', async (_req, res) => { try { res.json({ status: 'ok' }); } catch (error) { res.status(503).json({ status: 'error', message: error.message }); } });
+
+  // Health check: lightweight endpoint for load balancers and orchestrators
+  router.get('/health', async (_req, res) => {
+    try {
+      res.json({ status: 'ok' });
+    } catch (error) {
+      res.status(503).json({ status: 'error', message: error.message });
+    }
+  });
+
+  // GET /api/products?q=keyboard&category=electronics&cache=true&page=1&pageSize=20
+  // Search products with optional caching. Returns data, cacheHit, duration, pagination, and applied filters.
   router.get('/products', async (req, res, next) => {
     try {
       const pageNum = Number(req.query.page || 1);
@@ -34,8 +48,9 @@ export function createRouter(service, invalidationService) {
     } catch (error) { log.error({ err: error }, 'product request failed'); next(error); }
   });
 
-  // Invalidate every cached product entry on demand. The cache generation is
-  // bumped, so previously cached results become unreachable immediately.
+  // POST /api/cache/invalidate
+  // Manually invalidate all cached product entries on demand. Bumps generation counter
+  // so all cached results become unreachable immediately. Used by UI "Invalidate cache" button.
   router.post('/cache/invalidate', async (req, res, next) => {
     try {
       if (!invalidationService) {
@@ -48,7 +63,9 @@ export function createRouter(service, invalidationService) {
     } catch (error) { log.error({ err: error }, 'cache invalidation failed'); next(error); }
   });
 
-  // Report the current cache configuration and the automatic invalidation state.
+  // GET /api/cache/status
+  // Report current cache configuration (enabled, TTL, prefix), automatic invalidation settings,
+  // and the current data fingerprint (used by invalidation service to detect changes).
   router.get('/cache/status', async (_req, res, next) => {
     try {
       const fingerprint = invalidationService?.getFingerprint?.() ?? null;
