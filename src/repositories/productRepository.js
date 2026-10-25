@@ -23,10 +23,16 @@ export async function searchProducts(pool, { query = '', category = '', page = 1
       WHERE (p.name ILIKE $1 OR p.description ILIKE $1) AND ($2::text IS NULL OR c.slug = $2)
       GROUP BY p.id, c.name
     )
-    SELECT *, ROUND((price * (1 + units_sold * 0.001))::numeric, 2) AS dynamic_price
+    SELECT *, COUNT(*) OVER()::int AS total_count,
+           ROUND((price * (1 + units_sold * 0.001))::numeric, 2) AS dynamic_price
     FROM product_metrics ORDER BY units_sold DESC, average_rating DESC, id LIMIT $3 OFFSET $4`;
   const started = process.hrtime.bigint();
   const result = await queryWithDatabaseRetry(pool, sql, values);
   log.info({ rowCount: result.rowCount, durationMs: Number(process.hrtime.bigint() - started) / 1e6 }, 'product query completed');
-  return result.rows;
+  // COUNT(*) OVER() is calculated before LIMIT/OFFSET, so the UI can render
+  // reliable pagination without fetching an extra product or issuing a second
+  // count query. Remove the transport-only column before caching product data.
+  const totalCount = result.rows[0]?.total_count ?? 0;
+  const data = result.rows.map(({ total_count: _totalCount, ...product }) => product);
+  return { data, totalCount };
 }

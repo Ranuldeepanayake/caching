@@ -1,7 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertConfig } from '../src/config.js';
 import { createPostgresPool } from '../src/providers/postgres.js';
+assertConfig();
 const root = path.dirname(fileURLToPath(import.meta.url));
 // Reuse the production provider adapter so AWS endpoint discovery and retries also work for migrations.
 const pool = await createPostgresPool();

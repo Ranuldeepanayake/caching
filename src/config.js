@@ -8,6 +8,24 @@ const provider = (value, name) => {
   return normalized;
 };
 
+/**
+ * Parse a positive integer and fall back to the default when the value is
+ * missing or malformed. Used for every numeric setting that must stay sane.
+ */
+const positiveInt = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+/**
+ * Parse a non-negative integer. Zero is meaningful for polling intervals,
+ * where it means "disabled" rather than "invalid".
+ */
+const nonNegativeInt = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
+};
+
 export const config = {
   // Non-sensitive operational settings.
   port: Number(process.env.APP_PORT || 3000),
@@ -23,9 +41,14 @@ export const config = {
   awsRegion: process.env.AWS_REGION || 'us-east-1',
   rds: { instanceIdentifier: process.env.RDS_INSTANCE_IDENTIFIER, host: process.env.RDS_HOST, port: Number(process.env.RDS_PORT || 5432), database: process.env.RDS_DATABASE || 'shop', username: process.env.RDS_USERNAME, password: process.env.RDS_PASSWORD },
   elasticache: { replicationGroupId: process.env.ELASTICACHE_REPLICATION_GROUP_ID, host: process.env.ELASTICACHE_HOST, port: Number(process.env.ELASTICACHE_PORT || 6379), tls: process.env.ELASTICACHE_TLS === 'true', username: process.env.ELASTICACHE_USERNAME, password: process.env.ELASTICACHE_PASSWORD },
-  cacheTtlSeconds: Number(process.env.CACHE_TTL_SECONDS || 60),
+  cacheTtlSeconds: positiveInt(process.env.CACHE_TTL_SECONDS, 60),
   cacheKeyPrefix: process.env.CACHE_KEY_PREFIX || 'shop-demo',
-  defaultPageSize: Number(process.env.DEFAULT_PAGE_SIZE || 20)
+  defaultPageSize: Number(process.env.DEFAULT_PAGE_SIZE || 20),
+  // Cache invalidation: a generation counter is bumped whenever the underlying
+  // product data changes, so every previously cached entry becomes unreachable.
+  cacheInvalidationEnabled: process.env.CACHE_INVALIDATION_ENABLED !== 'false',
+  // Poll for source-data changes every five minutes by default.
+  cacheInvalidationIntervalMs: nonNegativeInt(process.env.CACHE_INVALIDATION_INTERVAL_MS, 300000)
 };
 
 export function assertConfig() {
