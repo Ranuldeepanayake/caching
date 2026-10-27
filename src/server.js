@@ -13,6 +13,8 @@ import { createInvalidationService } from './services/invalidationService.js';
 import { createRouter } from './routes.js';
 import { createSeoRouter } from './seo.js';
 
+// Startup is intentionally fail-fast: configuration and dependency connectivity
+// are checked before the HTTP server begins accepting product requests.
 assertConfig();
 logger.info(startupConfigSummary(), 'application configuration loaded');
 const pool = await createPostgresPool();
@@ -21,6 +23,8 @@ const productService = createProductService(pool, redis);
 const invalidationService = createInvalidationService(pool, redis, productService);
 const app = express();
 const directory = path.dirname(fileURLToPath(import.meta.url));
+// Request logging is installed before routes so every request receives timing,
+// status, and module context in the structured container logs.
 app.use(pinoHttp({ logger }));
 app.use(express.json());
 app.use(express.static(path.join(directory, '..', 'public')));
@@ -28,9 +32,13 @@ app.use(express.static(path.join(directory, '..', 'public')));
 app.get(['/robots.txt', '/sitemap.xml'], createSeoRouter());
 app.use('/api', createRouter(productService, invalidationService));
 app.use((error, _req, res, _next) => res.status(500).json({ error: 'internal_error', message: error.message }));
+// The app listens on the container port; HTTPS termination belongs at the
+// reverse proxy/load balancer in a production deployment.
 const server = app.listen(config.port, () => logger.info({ port: config.port, databaseProvider: config.databaseProvider, cacheProvider: config.cacheProvider }, 'server listening'));
 // Watch the underlying data so cached entries are invalidated when it changes.
 invalidationService.start();
+// Stop accepting traffic and release timers/connections so deploys do not leave
+// pooled clients or Redis sockets behind.
 const shutdown = async (signal) => { logger.info({ signal }, 'shutdown requested'); server.close(); invalidationService.stop(); await Promise.allSettled([pool.end(), redis?.quit()]); process.exit(0); };
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));

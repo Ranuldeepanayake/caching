@@ -1,3 +1,5 @@
+// Redis provider: builds an authenticated self-hosted or AWS ElastiCache
+// client, optionally enables verified TLS, and tolerates cache outages.
 import fs from 'node:fs/promises';
 import Redis from 'ioredis';
 import { ElastiCacheClient, DescribeReplicationGroupsCommand } from '@aws-sdk/client-elasticache';
@@ -6,6 +8,7 @@ import { childLogger } from '../logger.js';
 import { withConnectionRetry } from './retry.js';
 const log = childLogger('redis-provider');
 
+/** Resolve an AWS ElastiCache endpoint from an explicit host or replication group. */
 async function resolveAwsRedis() {
   if (config.elasticache.host) return { host: config.elasticache.host, port: config.elasticache.port };
   if (!config.elasticache.replicationGroupId) throw new Error('ELASTICACHE_HOST or ELASTICACHE_REPLICATION_GROUP_ID is required for AWS cache');
@@ -14,10 +17,14 @@ async function resolveAwsRedis() {
   const group = result.ReplicationGroups?.[0];
   const endpoint = group?.ConfigurationEndpoint || group?.NodeGroups?.[0]?.PrimaryEndpoint;
   if (!endpoint?.Address) throw new Error('ElastiCache replication group has no endpoint');
-  log.info({ replicationGroupId: config.elasticache.replicationGroupId, host: endpoint.Address }, 'resolved ElastiCache endpoint');
+  log.info({ replicationGroupId: config.elasticache.replicationGroupId, endpoint: { host: endpoint.Address, port: endpoint.Port || config.elasticache.port } }, 'resolved ElastiCache endpoint');
   return { host: endpoint.Address, port: endpoint.Port || config.elasticache.port };
 }
 
+/**
+ * Build Node TLS options. A CA file is optional when the server certificate is
+ * already trusted by Node; insecure mode deliberately disables verification.
+ */
 async function buildTlsOptions(tlsEnabled, tlsInsecure, tlsCertPath) {
   if (!tlsEnabled) return undefined;
   const tlsOpts = { rejectUnauthorized: !tlsInsecure };
@@ -27,6 +34,10 @@ async function buildTlsOptions(tlsEnabled, tlsInsecure, tlsCertPath) {
   return tlsOpts;
 }
 
+/**
+ * Create the cache client, or return null when cache use is deliberately disabled.
+ * @returns {Promise<import('ioredis')|null>} Connected Redis client or null.
+ */
 export async function createRedisClient() {
   // Disabled cache mode deliberately creates no Redis client and therefore no reconnect loop.
   if (!config.cacheEnabled) {
@@ -57,6 +68,20 @@ export async function createRedisClient() {
       tls: tlsOpts
     };
   }
+
+  // Log the effective endpoint and TLS posture after AWS discovery and URL
+  // parsing, without logging Redis credentials or certificate contents.
+  log.info({
+    provider: config.cacheProvider,
+    endpoint: { host: clientConfig.host, port: clientConfig.port },
+    tls: {
+      enabled: Boolean(clientConfig.tls),
+      insecure: Boolean(clientConfig.tls?.rejectUnauthorized === false),
+      certificateVerification: clientConfig.tls ? clientConfig.tls.rejectUnauthorized !== false : false,
+      caPathSet: Boolean(config.cacheProvider === 'aws' ? config.elasticache.tlsCertPath : config.redis.tlsCertPath),
+      caPath: config.cacheProvider === 'aws' ? (config.elasticache.tlsCertPath || null) : (config.redis.tlsCertPath || null)
+    }
+  }, 'Redis client configuration resolved');
 
   const client = new Redis({
     ...clientConfig,

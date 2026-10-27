@@ -3,7 +3,14 @@ import { childLogger } from '../logger.js';
 import { queryWithDatabaseRetry } from '../providers/postgres.js';
 const log = childLogger('product-repository');
 
-/** Deliberately expensive reporting query: joins products, categories, inventory, reviews and order history. */
+/**
+ * Search the reporting read model with server-side pagination.
+ * The window count is calculated before LIMIT/OFFSET so one query supplies
+ * both the current page and the total number of matching products.
+ * @param {import('pg').Pool} pool - Database pool.
+ * @param {{query?: string, category?: string, page?: number, pageSize?: number}} filters - Search and paging inputs.
+ * @returns {Promise<{data: object[], totalCount: number}>} Products and full match count.
+ */
 export async function searchProducts(pool, { query = '', category = '', page = 1, pageSize = 20 }) {
   const offset = (page - 1) * pageSize;
   const values = [`%${query}%`, category || null, pageSize, offset];

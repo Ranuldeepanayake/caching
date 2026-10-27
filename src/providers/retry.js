@@ -5,6 +5,13 @@ import { childLogger } from '../logger.js';
 
 const log = childLogger('connection-retry');
 
+/**
+ * Run a dependency operation with bounded exponential backoff.
+ * @param {() => Promise<unknown>} operation - Operation that may fail transiently.
+ * @param {string} dependency - Safe dependency label used in diagnostic logs.
+ * @returns {Promise<unknown>} The first successful operation result.
+ * @throws The final error after all configured attempts fail.
+ */
 export async function withConnectionRetry(operation, dependency) {
   let lastError;
   for (let attempt = 1; attempt <= config.connectionRetryAttempts; attempt += 1) {

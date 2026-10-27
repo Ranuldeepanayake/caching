@@ -5,6 +5,8 @@
 const $ = (id) => document.getElementById(id);
 let currentPage = 1;
 let lastResult = null;
+
+/** Execute a product search and render one server-side page. */
 async function run(page = 1) {
   currentPage = page;
   const pageSizeInput = Number($('pageSize').value);
@@ -24,6 +26,8 @@ async function run(page = 1) {
     renderPagination();
   } catch (error) { $('status').textContent = error.message; } finally { $('run').disabled = false; }
 }
+
+/** Render Previous/Next controls from server-provided pagination metadata. */
 function renderPagination() {
   if (!lastResult || lastResult.data.length === 0) { $('pagination').innerHTML = ''; return; }
   const pageSizeInput = Number($('pageSize').value);
@@ -39,14 +43,18 @@ function renderPagination() {
   if (currentPage > 1) $('prev-page').addEventListener('click', () => run(currentPage - 1));
   if (hasNext) $('next-page').addEventListener('click', () => run(currentPage + 1));
 }
+
+/** Escape database-provided text before inserting it into an HTML template. */
 function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char])); }
 
 // Show the active cache configuration so the TTL and invalidation settings are
 // visible while demonstrating the cache.
+/** Load cache configuration for the diagnostic status line. */
 async function loadCacheStatus() { try { const response = await fetch('/api/cache/status'); const status = await response.json(); if (!response.ok) throw new Error(status.message || 'Request failed'); const automatic = status.automaticInvalidation?.enabled && status.automaticInvalidation?.intervalMs ? `every ${Math.round(status.automaticInvalidation.intervalMs / 1000)}s` : 'disabled'; $('cache-status').innerHTML = `Cache <strong>${status.cacheEnabled ? 'enabled' : 'disabled'}</strong> · TTL <strong>${status.ttlSeconds}s</strong> · key prefix <strong>${escapeHtml(status.keyPrefix)}</strong> · automatic invalidation <strong>${automatic}</strong>`; } catch (error) { $('cache-status').textContent = `Cache status unavailable: ${error.message}`; } }
 
 // Invalidate every cached entry. The next query therefore reads PostgreSQL and
 // repopulates the cache, which demonstrates the miss path on demand.
+/** Request generation-based invalidation and report the result to the user. */
 async function invalidate() { $('invalidate').disabled = true; $('status').textContent = 'Invalidating cache…'; try { const response = await fetch('/api/cache/invalidate', { method: 'POST' }); const result = await response.json(); if (!response.ok) throw new Error(result.message || 'Invalidation failed'); $('status').innerHTML = `<strong>Cache invalidated</strong> · generation ${result.generation} · ${result.durationMs.toFixed(2)} ms · next query will read PostgreSQL`; } catch (error) { $('status').textContent = error.message; } finally { $('invalidate').disabled = false; } }
 // Event listeners receive a PointerEvent, but run() expects a numeric page.
 // Start a fresh query at page one instead of passing the event as the page.

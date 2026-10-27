@@ -1,5 +1,6 @@
 // Apply only the repeatable demo dataset. This is useful when the schema already
 // exists and a developer wants to refresh a local demo without running migrations.
+// The finally block guarantees the pool closes even if PostgreSQL rejects the SQL.
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

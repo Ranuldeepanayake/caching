@@ -1,11 +1,19 @@
 -- Core ecommerce schema: normalized tables and indexes make the cacheable read realistic.
+-- This file is idempotent and is applied before the repeatable seed script.
+-- Categories are referenced by products and provide the public filter slug.
 CREATE TABLE IF NOT EXISTS categories (id SERIAL PRIMARY KEY, name TEXT NOT NULL, slug TEXT UNIQUE NOT NULL);
+-- Customers own orders and reviews; they also make the reporting joins realistic.
 CREATE TABLE IF NOT EXISTS customers (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, full_name TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+-- Products are the primary read model returned by the application.
 CREATE TABLE IF NOT EXISTS products (id SERIAL PRIMARY KEY, category_id INT NOT NULL REFERENCES categories(id), sku TEXT UNIQUE NOT NULL, name TEXT NOT NULL, description TEXT, price NUMERIC(10,2) NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+-- Inventory is separate so availability can be aggregated by warehouse.
 CREATE TABLE IF NOT EXISTS inventory (id SERIAL PRIMARY KEY, product_id INT NOT NULL REFERENCES products(id), warehouse TEXT NOT NULL, available_quantity INT NOT NULL, reserved_quantity INT NOT NULL DEFAULT 0);
+-- Orders and line items supply the units-sold metric used for product ranking.
 CREATE TABLE IF NOT EXISTS orders (id SERIAL PRIMARY KEY, customer_id INT NOT NULL REFERENCES customers(id), status TEXT NOT NULL CHECK (status IN ('pending','paid','shipped','delivered','cancelled')), ordered_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS order_items (id SERIAL PRIMARY KEY, order_id INT NOT NULL REFERENCES orders(id), product_id INT NOT NULL REFERENCES products(id), quantity INT NOT NULL, unit_price NUMERIC(10,2) NOT NULL);
+-- Reviews supply the approved average rating and review count metrics.
 CREATE TABLE IF NOT EXISTS reviews (id SERIAL PRIMARY KEY, customer_id INT NOT NULL REFERENCES customers(id), product_id INT NOT NULL REFERENCES products(id), rating INT NOT NULL CHECK (rating BETWEEN 1 AND 5), review_text TEXT, is_approved BOOLEAN NOT NULL DEFAULT true);
+-- Indexes support the filter and join columns used by the expensive read query.
 CREATE INDEX IF NOT EXISTS products_search_idx ON products USING GIN (to_tsvector('simple', name || ' ' || coalesce(description,'')));
 CREATE INDEX IF NOT EXISTS categories_slug_idx ON categories(slug);
 CREATE INDEX IF NOT EXISTS orders_product_status_idx ON orders(status);

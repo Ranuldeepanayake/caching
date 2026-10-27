@@ -505,7 +505,9 @@ The columns are nullable on purpose. A unique index ignores NULLs, so rows creat
 
 A minority of the seeded reviews are left unapproved, so the `is_approved` filter in the product query is exercised rather than always matching everything.
 
-Logs are JSON and include ISO timestamps, service/module context, request metadata, provider selection, cache outcome, row count, and duration. In containers, use `docker compose logs -f app` and set `LOG_LEVEL=debug` when more detail is needed. Startup logs include non-sensitive settings, endpoint-presence flags, and true/false indicators for sensitive variables such as AWS keys and database/cache passwords. Secret values are never logged.
+Logs are JSON and include ISO timestamps, service/module context, request metadata, provider selection, cache outcome, row count, and duration. In containers, use `docker compose logs -f app` and set `LOG_LEVEL=debug` when more detail is needed. The startup configuration record is grouped into `server`, `providers`, `cache`, `retries`, `endpoints`, and `tls` fields. It reports the safe host/port/database endpoint details, endpoint source, TLS enabled state, certificate-verification state, and CA path presence/value; connection URLs, passwords, AWS keys, tokens, and certificate contents are never logged. AWS endpoint-resolution logs report the resolved host and port, followed by a provider connection log showing the effective TLS posture.
+
+Source files use module headers and function-level comments to document ownership, inputs, outputs, side effects, security boundaries, and non-obvious operational behavior. SQL files document table ownership, indexes, seed determinism, and idempotency rules; browser files document the DOM contract between HTML, CSS, and JavaScript.
 
 Every product request logs `product request completed` with a `cacheHit` field, so cache hits and misses are both visible in the logs. The cache key is included, which makes it possible to confirm that an invalidation actually changed the keys in use.
 

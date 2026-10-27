@@ -2,7 +2,11 @@
 // origin is configurable for deployments behind proxies or custom domains.
 import { config } from './config.js';
 
-/** Resolve the public origin without exposing internal service names in metadata. */
+/**
+ * Resolve a canonical public origin from configuration or proxy data.
+ * @param {import('express').Request} request - Current HTTP request.
+ * @returns {string} Origin without a trailing slash.
+ */
 export function getPublicOrigin(request) {
   const configuredOrigin = config.publicBaseUrl;
   if (configuredOrigin) return configuredOrigin.replace(/\/$/, '');

@@ -24,6 +24,42 @@ const nonNegativeInt = (value, fallback) => {
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 };
 
+// Parse a connection URL for diagnostics without returning userinfo,
+// passwords, query secrets, or the original URL.
+function connectionEndpoint(value, defaultPort) {
+  if (!value) return { configured: false, host: null, port: null, scheme: null, parseError: false };
+  try {
+    const parsed = new URL(value);
+    return { configured: true, host: parsed.hostname || null, port: Number(parsed.port || defaultPort), scheme: parsed.protocol.replace(':', ''), parseError: false };
+  } catch {
+    return { configured: true, host: null, port: null, scheme: null, parseError: true };
+  }
+}
+
+// PostgreSQL URLs can carry SSL settings. Report their presence and mode, but
+// never include the URL or any credential-bearing query values.
+function postgresTlsSummary(value) {
+  if (!value) return { configured: false, mode: 'not-configured', caPathSet: false, caPath: null };
+  try {
+    const parsed = new URL(value);
+    const mode = parsed.searchParams.get('sslmode') || 'driver-default';
+    const caPath = parsed.searchParams.get('sslrootcert');
+    return { configured: mode !== 'disable', mode, caPathSet: Boolean(caPath), caPath: caPath || null };
+  } catch {
+    return { configured: false, mode: 'unparseable-url', caPathSet: false, caPath: null };
+  }
+}
+
+function postgresDatabaseName(value) {
+  try { return new URL(value).pathname.slice(1) || null; } catch { return null; }
+}
+
+// Reusable safe diagnostics for provider startup logs. These helpers never
+// expose connection credentials or certificate contents.
+export function connectionDiagnostics(value, defaultPort) {
+  return { endpoint: connectionEndpoint(value, defaultPort), tls: postgresTlsSummary(value) };
+}
+
 // All configuration is exported as a single object. See README for environment variable reference.
 export const config = {
   // Server and logging
@@ -105,24 +141,30 @@ export function assertConfig() {
 // Secret values (passwords, API keys) are never included; only Boolean flags indicating if they are set.
 // Logged at application startup to confirm configuration without leaking sensitive data.
 export function startupConfigSummary() {
-  return {
-    // Non-sensitive operational settings
-    port: config.port,
-    logLevel: config.logLevel,
-    databaseProvider: config.databaseProvider,
-    cacheProvider: config.cacheProvider,
-    cacheEnabled: config.cacheEnabled,
-    awsRegion: config.awsRegion,
-    cacheTtlSeconds: config.cacheTtlSeconds,
-    connectionRetryAttempts: config.connectionRetryAttempts,
-    connectionRetryBaseDelayMs: config.connectionRetryBaseDelayMs,
+  const postgresConnection = connectionDiagnostics(config.databaseUrl, 5432);
+  const redisConnection = connectionEndpoint(config.redisUrl, 6379);
 
-    // Endpoint presence flags (safe to log; shows which providers are configured)
+  return {
+    // Grouping startup settings makes provider diagnostics easy to find in JSON logs.
+    server: { port: config.port, logLevel: config.logLevel, publicBaseUrlSet: Boolean(config.publicBaseUrl) },
+    providers: { database: config.databaseProvider, cache: config.cacheProvider, cacheEnabled: config.cacheEnabled, awsRegion: config.awsRegion },
+    cache: { ttlSeconds: config.cacheTtlSeconds, invalidationEnabled: config.cacheInvalidationEnabled, invalidationIntervalMs: config.cacheInvalidationIntervalMs },
+    retries: { attempts: config.connectionRetryAttempts, baseDelayMs: config.connectionRetryBaseDelayMs },
+
+    // Endpoint fields contain host/port only. Credentials remain excluded.
     endpoints: {
-      databaseUrlSet: Boolean(config.databaseUrl),
-      redisUrlSet: Boolean(config.redisUrl),
-      rdsHostSet: Boolean(config.rds.host),
-      elasticacheHostSet: Boolean(config.elasticache.host)
+      postgres: config.databaseProvider === 'self-hosted' ? { ...postgresConnection.endpoint, database: postgresDatabaseName(config.databaseUrl), source: 'DATABASE_URL' } : { configured: false, host: null, port: null, database: null, source: 'not-used' },
+      rds: { configured: config.databaseProvider === 'aws', host: config.rds.host || null, port: config.rds.port, database: config.rds.database, source: config.rds.host ? 'RDS_HOST' : (config.rds.instanceIdentifier ? 'RDS_INSTANCE_IDENTIFIER' : 'not-configured') },
+      redis: config.cacheProvider === 'self-hosted' ? { ...redisConnection, source: 'REDIS_URL' } : { configured: false, host: null, port: null, scheme: null, parseError: false, source: 'not-used' },
+      elasticache: { configured: config.cacheEnabled && config.cacheProvider === 'aws', host: config.elasticache.host || null, port: config.elasticache.port, source: config.elasticache.host ? 'ELASTICACHE_HOST' : (config.elasticache.replicationGroupId ? 'ELASTICACHE_REPLICATION_GROUP_ID' : 'not-configured') },
+      // Retain the original presence flags for existing log consumers.
+      databaseUrlSet: Boolean(config.databaseUrl), redisUrlSet: Boolean(config.redisUrl), rdsHostSet: Boolean(config.rds.host), elasticacheHostSet: Boolean(config.elasticache.host)
+    },
+    tls: {
+      postgres: config.databaseProvider === 'self-hosted' ? postgresConnection.tls : { configured: false, mode: 'not-configured-by-provider', caPathSet: false, caPath: null },
+      rds: { configured: false, mode: 'not-configured-by-provider', caPathSet: false, caPath: null },
+      redis: { enabled: config.redis.tls, insecure: config.redis.tlsInsecure, certificateVerification: config.redis.tls ? !config.redis.tlsInsecure : false, caPathSet: Boolean(config.redis.tlsCertPath), caPath: config.redis.tlsCertPath || null },
+      elasticache: { enabled: config.elasticache.tls, insecure: config.elasticache.tlsInsecure, certificateVerification: config.elasticache.tls ? !config.elasticache.tlsInsecure : false, caPathSet: Boolean(config.elasticache.tlsCertPath), caPath: config.elasticache.tlsCertPath || null }
     },
 
     // Sensitive variable presence flags (safe to log; only Boolean, never the actual values)
